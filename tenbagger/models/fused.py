@@ -394,6 +394,186 @@ def capex_score(capex_ratio: Optional[float]) -> float:
     return 0.0
 
 
+def cash_quality_score(*, cfo_yuan: Optional[float], net_profit_yuan: Optional[float]) -> float:
+    """
+    现金含金量（0..100）：经营现金流与利润的匹配程度（CFO≈利润）。
+    典型“好公司”：利润增长时，CFO 不明显掉队。
+    """
+    if net_profit_yuan is None or net_profit_yuan == 0 or cfo_yuan is None:
+        return 0.0
+    if net_profit_yuan < 0:
+        return 0.0
+    ratio = cfo_yuan / net_profit_yuan
+    if ratio >= 1.3:
+        return 100.0
+    if ratio >= 1.0:
+        return 90.0
+    if ratio >= 0.8:
+        return 75.0
+    if ratio >= 0.6:
+        return 55.0
+    if ratio >= 0.4:
+        return 35.0
+    if ratio > 0:
+        return 20.0
+    return 0.0
+
+
+def ops_quality_score(
+    *,
+    ar_to_rev: Optional[float],
+    inv_to_rev: Optional[float],
+    ar_to_rev_delta: Optional[float],
+    inv_to_rev_delta: Optional[float],
+) -> float:
+    """
+    营运质量（0..100）：用“应收/收入、存货/收入”及其变化做代理。
+    - 比例越低越好（资金占用少、回款/周转更好）
+    - 比例上升（delta>0）扣分（可能是压货/回款变差）
+    """
+    score = 0.0
+    if ar_to_rev is not None:
+        if ar_to_rev <= 0.10:
+            score += 30
+        elif ar_to_rev <= 0.18:
+            score += 22
+        elif ar_to_rev <= 0.28:
+            score += 14
+        else:
+            score += 6
+    if inv_to_rev is not None:
+        if inv_to_rev <= 0.12:
+            score += 30
+        elif inv_to_rev <= 0.22:
+            score += 22
+        elif inv_to_rev <= 0.35:
+            score += 14
+        else:
+            score += 6
+    if ar_to_rev_delta is not None:
+        if ar_to_rev_delta <= -0.03:
+            score += 20
+        elif ar_to_rev_delta <= 0.00:
+            score += 14
+        elif ar_to_rev_delta <= 0.03:
+            score += 8
+        else:
+            score += 2
+    if inv_to_rev_delta is not None:
+        if inv_to_rev_delta <= -0.03:
+            score += 20
+        elif inv_to_rev_delta <= 0.00:
+            score += 14
+        elif inv_to_rev_delta <= 0.03:
+            score += 8
+        else:
+            score += 2
+    return min(100.0, score)
+
+
+def refi_pressure_score(
+    *,
+    cash_yuan: Optional[float],
+    short_debt_yuan: Optional[float],
+    long_debt_yuan: Optional[float],
+) -> float:
+    """
+    再融资/偿债压力（0..100）：用货币资金与有息负债结构做代理。
+    - 净现金更好
+    - 短债/现金比越低越好（短期压力低）
+    """
+    cash = cash_yuan if cash_yuan is not None else 0.0
+    sd = short_debt_yuan if short_debt_yuan is not None else 0.0
+    ld = long_debt_yuan if long_debt_yuan is not None else 0.0
+    debt = sd + ld
+    if cash <= 0 and debt <= 0:
+        return 0.0
+
+    net_debt = debt - cash
+    short_cov = (sd / cash) if cash > 0 else None
+
+    score = 0.0
+    if net_debt <= 0:
+        score += 55
+    else:
+        # net debt ratio proxy
+        if debt > 0:
+            nd_ratio = net_debt / debt
+            if nd_ratio <= 0.25:
+                score += 40
+            elif nd_ratio <= 0.50:
+                score += 28
+            elif nd_ratio <= 0.75:
+                score += 18
+            else:
+                score += 10
+
+    if short_cov is not None:
+        if short_cov <= 0.3:
+            score += 45
+        elif short_cov <= 0.6:
+            score += 35
+        elif short_cov <= 1.0:
+            score += 24
+        elif short_cov <= 2.0:
+            score += 12
+        else:
+            score += 5
+    else:
+        if cash > 0 and sd <= 0:
+            score += 30
+
+    return min(100.0, score)
+
+
+def interest_coverage_score(*, operating_profit_yuan: Optional[float], interest_expense_yuan: Optional[float]) -> float:
+    """
+    利息保障（0..100）：用营业利润/利息支出（或财务费用正值代理）做近似。
+    """
+    if operating_profit_yuan is None or interest_expense_yuan is None:
+        return 0.0
+    if operating_profit_yuan <= 0 or interest_expense_yuan <= 0:
+        return 0.0
+    cov = operating_profit_yuan / interest_expense_yuan
+    if cov >= 12:
+        return 100.0
+    if cov >= 8:
+        return 85.0
+    if cov >= 5:
+        return 70.0
+    if cov >= 3:
+        return 50.0
+    if cov >= 1.5:
+        return 30.0
+    return 10.0
+
+
+def financial_quality_total(
+    *,
+    cfo_yuan: Optional[float],
+    net_profit_yuan: Optional[float],
+    ar_to_rev: Optional[float],
+    inv_to_rev: Optional[float],
+    ar_to_rev_delta: Optional[float],
+    inv_to_rev_delta: Optional[float],
+    cash_yuan: Optional[float],
+    short_debt_yuan: Optional[float],
+    long_debt_yuan: Optional[float],
+    operating_profit_yuan: Optional[float],
+    interest_expense_yuan: Optional[float],
+) -> float:
+    """
+    财务/运营质量综合分（0..100）：把“现金含金量、营运质量、偿债/再融资压力、利息保障”合并。
+    """
+    s_cash = cash_quality_score(cfo_yuan=cfo_yuan, net_profit_yuan=net_profit_yuan)
+    s_ops = ops_quality_score(
+        ar_to_rev=ar_to_rev, inv_to_rev=inv_to_rev, ar_to_rev_delta=ar_to_rev_delta, inv_to_rev_delta=inv_to_rev_delta
+    )
+    s_refi = refi_pressure_score(cash_yuan=cash_yuan, short_debt_yuan=short_debt_yuan, long_debt_yuan=long_debt_yuan)
+    s_cov = interest_coverage_score(operating_profit_yuan=operating_profit_yuan, interest_expense_yuan=interest_expense_yuan)
+    return 0.35 * s_cash + 0.25 * s_ops + 0.25 * s_refi + 0.15 * s_cov
+
+
 @dataclass(frozen=True)
 class HardGate:
     ok: bool
@@ -437,15 +617,17 @@ def score_fused_total(
     ret250: Optional[float],
     dd250: Optional[float],
     second_total: float,
+    fin_quality: float,
 ) -> float:
     """
     融合总分（0..100），用于排序选股。
 
     权重（可理解为四大维度）：
-    - 38% core_score：质量/估值/压力（更稳的底座）
-    - 22% turning：拐点/趋势确认（减少沉默成本）
-    - 15% low_cost：低成本买入代理（离 250日低点更近、回撤更深更加分）
+    - 32% core_score：质量/估值/压力（更稳的底座）
+    - 20% turning：拐点/趋势确认（减少沉默成本）
+    - 13% low_cost：低成本买入代理（离 250日低点更近、回撤更深更加分）
     - 25% prereq：十倍股前置条件（天花板/增长/第二曲线）
+    - 10% fin_quality：财务/运营质量（现金含金量、营运质量、再融资压力等）
     """
     turning = 0.0
     if signal.ok:
@@ -486,5 +668,5 @@ def score_fused_total(
     prereq += 0.30 * gate.growth_total
     prereq += 0.30 * second_total
 
-    total = 0.38 * core_score + 0.22 * turning + 0.15 * low_cost + 0.25 * prereq
+    total = 0.32 * core_score + 0.20 * turning + 0.13 * low_cost + 0.25 * prereq + 0.10 * fin_quality
     return float(min(100.0, max(0.0, total)))

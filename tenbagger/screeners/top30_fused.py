@@ -21,14 +21,19 @@ from tenbagger.models.fused import (
     HardGate,
     InflectionSignal,
     capex_score,
+    cash_quality_score,
     diversification_score,
+    financial_quality_total,
     growth_score,
     hard_gate,
     industry_ceiling_score,
     inflection_signal,
+    interest_coverage_score,
     momentum_from_series,
+    ops_quality_score,
     overseas_score,
     rd_score,
+    refi_pressure_score,
     score_fused_total,
     score_quality_value_core,
 )
@@ -97,6 +102,22 @@ class Row:
     nm: Optional[float]
     roe: Optional[float]
     debt_ratio: Optional[float]
+    cfo_yuan: Optional[float]
+    cfo_to_profit: Optional[float]
+    cash_yuan: Optional[float]
+    short_debt_yuan: Optional[float]
+    long_debt_yuan: Optional[float]
+    net_debt_yuan: Optional[float]
+    short_debt_to_cash: Optional[float]
+    ar_to_rev: Optional[float]
+    inv_to_rev: Optional[float]
+    ar_to_rev_delta: Optional[float]
+    inv_to_rev_delta: Optional[float]
+    fin_quality_total: float
+    fin_cash_score: float
+    fin_ops_score: float
+    fin_refi_score: float
+    fin_cov_score: float
     ret120: Optional[float]
     ret250: Optional[float]
     dd250: Optional[float]
@@ -147,6 +168,22 @@ def _row_stub(stock: Stock, msg: str) -> Row:
         nm=None,
         roe=None,
         debt_ratio=None,
+        cfo_yuan=None,
+        cfo_to_profit=None,
+        cash_yuan=None,
+        short_debt_yuan=None,
+        long_debt_yuan=None,
+        net_debt_yuan=None,
+        short_debt_to_cash=None,
+        ar_to_rev=None,
+        inv_to_rev=None,
+        ar_to_rev_delta=None,
+        inv_to_rev_delta=None,
+        fin_quality_total=0.0,
+        fin_cash_score=0.0,
+        fin_ops_score=0.0,
+        fin_refi_score=0.0,
+        fin_cov_score=0.0,
         ret120=None,
         ret250=None,
         dd250=None,
@@ -194,6 +231,33 @@ def _compute_base_fast(stock: Stock, *, db_conn, cache_dir: Path) -> Optional[tu
     rd_ratio, capex_ratio = rd_and_capex_ratio(code=stock.code, year=f.year, revenue_yuan=f.revenue_yuan, cache_dir=cache_dir / "sina")
     second_total_light = 0.6 * rd_score(rd_ratio) + 0.4 * capex_score(capex_ratio)
 
+    # Financial quality light proxy (uses year-end balances; no F10)
+    ar_to_rev = _safe_div(f.accounts_receivable_yuan, f.revenue_yuan) if (f.revenue_yuan and f.revenue_yuan > 0) else None
+    inv_to_rev = _safe_div(f.inventory_yuan, f.revenue_yuan) if (f.revenue_yuan and f.revenue_yuan > 0) else None
+    ar_to_rev_delta = None
+    inv_to_rev_delta = None
+    if len(series) >= 2 and series[-2].revenue_yuan and series[-2].revenue_yuan > 0 and series[-1].revenue_yuan and series[-1].revenue_yuan > 0:
+        ar_prev = _safe_div(series[-2].accounts_receivable_yuan, series[-2].revenue_yuan)
+        inv_prev = _safe_div(series[-2].inventory_yuan, series[-2].revenue_yuan)
+        if ar_prev is not None and ar_to_rev is not None:
+            ar_to_rev_delta = ar_to_rev - ar_prev
+        if inv_prev is not None and inv_to_rev is not None:
+            inv_to_rev_delta = inv_to_rev - inv_prev
+
+    fin_total = financial_quality_total(
+        cfo_yuan=f.cfo_yuan,
+        net_profit_yuan=f.net_profit_yuan,
+        ar_to_rev=ar_to_rev,
+        inv_to_rev=inv_to_rev,
+        ar_to_rev_delta=ar_to_rev_delta,
+        inv_to_rev_delta=inv_to_rev_delta,
+        cash_yuan=f.cash_yuan,
+        short_debt_yuan=f.short_debt_yuan,
+        long_debt_yuan=f.long_debt_yuan,
+        operating_profit_yuan=f.operating_profit_yuan,
+        interest_expense_yuan=f.interest_expense_yuan,
+    )
+
     ceiling_total_light = industry_ceiling_score(stock.industry)
     gate = hard_gate(ceiling_total=ceiling_total_light, second_total=second_total_light, growth_total=growth_total)
 
@@ -205,7 +269,7 @@ def _compute_base_fast(stock: Stock, *, db_conn, cache_dir: Path) -> Optional[tu
     if signal.pos_from_250_low is not None and signal.pos_from_250_low <= 0.45:
         turning_bonus += 6.0
 
-    base = 0.55 * core + 0.25 * growth_total + 0.20 * second_total_light + turning_bonus
+    base = 0.50 * core + 0.22 * growth_total + 0.18 * second_total_light + 0.10 * fin_total + turning_bonus
     if not gate.ok:
         base -= 25.0
     return float(base), asof_date
@@ -262,6 +326,51 @@ def score_one(stock: Stock, *, db_conn, cache_dir: Path) -> Row:
         second_capex = capex_score(capex_ratio)
         second_total = 0.5 * second_div + 0.3 * second_rd + 0.2 * second_capex
 
+        # Financial/ops quality (annual statement proxies)
+        cfo_to_profit = _safe_div(f.cfo_yuan, f.net_profit_yuan) if (f.net_profit_yuan and f.net_profit_yuan > 0) else None
+        cash = f.cash_yuan
+        sd = f.short_debt_yuan
+        ld = f.long_debt_yuan
+        debt = (sd or 0.0) + (ld or 0.0)
+        net_debt_yuan = (debt - (cash or 0.0)) if (cash is not None or debt > 0) else None
+        short_debt_to_cash = _safe_div(sd, cash) if (sd is not None and cash is not None and cash > 0) else None
+
+        ar_to_rev = _safe_div(f.accounts_receivable_yuan, f.revenue_yuan) if (f.revenue_yuan and f.revenue_yuan > 0) else None
+        inv_to_rev = _safe_div(f.inventory_yuan, f.revenue_yuan) if (f.revenue_yuan and f.revenue_yuan > 0) else None
+        ar_to_rev_delta = None
+        inv_to_rev_delta = None
+        if len(series) >= 2:
+            prev = series[-2]
+            ar_prev = _safe_div(prev.accounts_receivable_yuan, prev.revenue_yuan) if (prev.revenue_yuan and prev.revenue_yuan > 0) else None
+            inv_prev = _safe_div(prev.inventory_yuan, prev.revenue_yuan) if (prev.revenue_yuan and prev.revenue_yuan > 0) else None
+            if ar_prev is not None and ar_to_rev is not None:
+                ar_to_rev_delta = ar_to_rev - ar_prev
+            if inv_prev is not None and inv_to_rev is not None:
+                inv_to_rev_delta = inv_to_rev - inv_prev
+
+        fin_cash_score = cash_quality_score(cfo_yuan=f.cfo_yuan, net_profit_yuan=f.net_profit_yuan)
+        fin_ops_score = ops_quality_score(
+            ar_to_rev=ar_to_rev, inv_to_rev=inv_to_rev, ar_to_rev_delta=ar_to_rev_delta, inv_to_rev_delta=inv_to_rev_delta
+        )
+        fin_refi_score = refi_pressure_score(cash_yuan=cash, short_debt_yuan=sd, long_debt_yuan=ld)
+        fin_cov_score = interest_coverage_score(
+            operating_profit_yuan=f.operating_profit_yuan, interest_expense_yuan=f.interest_expense_yuan
+        )
+
+        fin_quality_total_score = financial_quality_total(
+            cfo_yuan=f.cfo_yuan,
+            net_profit_yuan=f.net_profit_yuan,
+            ar_to_rev=ar_to_rev,
+            inv_to_rev=inv_to_rev,
+            ar_to_rev_delta=ar_to_rev_delta,
+            inv_to_rev_delta=inv_to_rev_delta,
+            cash_yuan=cash,
+            short_debt_yuan=sd,
+            long_debt_yuan=ld,
+            operating_profit_yuan=f.operating_profit_yuan,
+            interest_expense_yuan=f.interest_expense_yuan,
+        )
+
         gate: HardGate = hard_gate(ceiling_total=ceiling_total, second_total=second_total, growth_total=growth_total)
         total = score_fused_total(
             core_score=core_score,
@@ -271,6 +380,7 @@ def score_one(stock: Stock, *, db_conn, cache_dir: Path) -> Row:
             ret250=ret250,
             dd250=dd250,
             second_total=second_total,
+            fin_quality=fin_quality_total_score,
         )
 
         # purely informational proxies for debug
@@ -314,6 +424,22 @@ def score_one(stock: Stock, *, db_conn, cache_dir: Path) -> Row:
             nm=nm,
             roe=roe,
             debt_ratio=debt_ratio,
+            cfo_yuan=f.cfo_yuan,
+            cfo_to_profit=cfo_to_profit,
+            cash_yuan=cash,
+            short_debt_yuan=sd,
+            long_debt_yuan=ld,
+            net_debt_yuan=net_debt_yuan,
+            short_debt_to_cash=short_debt_to_cash,
+            ar_to_rev=ar_to_rev,
+            inv_to_rev=inv_to_rev,
+            ar_to_rev_delta=ar_to_rev_delta,
+            inv_to_rev_delta=inv_to_rev_delta,
+            fin_quality_total=fin_quality_total_score,
+            fin_cash_score=fin_cash_score,
+            fin_ops_score=fin_ops_score,
+            fin_refi_score=fin_refi_score,
+            fin_cov_score=fin_cov_score,
             ret120=ret120,
             ret250=ret250,
             dd250=dd250,
@@ -387,6 +513,22 @@ def main(argv: list[str]) -> int:
                 "硬门槛通过(1/0)",
                 "拐点信号通过(1/0)",
                 "核心分(质量/估值/压力)",
+                "财务运营质量总分",
+                "现金含金量得分(CFO≈利润)",
+                "营运质量得分(应收/存货)",
+                "再融资压力得分(现金/短债)",
+                "利息保障得分",
+                "经营现金流CFO(元)",
+                "CFO/净利润(估算)",
+                "货币资金(元)",
+                "有息负债_短债(元)",
+                "有息负债_长债(元)",
+                "净负债(元)",
+                "短债/现金(估算)",
+                "应收/收入(估算)",
+                "存货/收入(估算)",
+                "应收/收入_变化(估算)",
+                "存货/收入_变化(估算)",
                 "行业天花板得分",
                 "境外收入占比(如可得)",
                 "出海得分",
@@ -431,6 +573,22 @@ def main(argv: list[str]) -> int:
                     r.gate_ok,
                     r.entry_ok,
                     _fmt(r.core_score, 1),
+                    _fmt(r.fin_quality_total, 1),
+                    _fmt(r.fin_cash_score, 1),
+                    _fmt(r.fin_ops_score, 1),
+                    _fmt(r.fin_refi_score, 1),
+                    _fmt(r.fin_cov_score, 1),
+                    _fmt(r.cfo_yuan, 0),
+                    _fmt(r.cfo_to_profit, 4),
+                    _fmt(r.cash_yuan, 0),
+                    _fmt(r.short_debt_yuan, 0),
+                    _fmt(r.long_debt_yuan, 0),
+                    _fmt(r.net_debt_yuan, 0),
+                    _fmt(r.short_debt_to_cash, 4),
+                    _fmt(r.ar_to_rev, 4),
+                    _fmt(r.inv_to_rev, 4),
+                    _fmt(r.ar_to_rev_delta, 4),
+                    _fmt(r.inv_to_rev_delta, 4),
                     _fmt(r.ceiling_industry, 1),
                     _fmt(r.overseas_share, 4),
                     _fmt(r.ceiling_overseas, 1),

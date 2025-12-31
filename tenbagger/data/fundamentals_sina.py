@@ -18,6 +18,10 @@ SINA_BALANCE_URL = (
     "https://money.finance.sina.com.cn/corp/go.php/"
     "vFD_BalanceSheet/stockid/{code}/ctrl/{year}/displaytype/4.phtml"
 )
+SINA_CASHFLOW_URL = (
+    "https://money.finance.sina.com.cn/corp/go.php/"
+    "vFD_CashFlow/stockid/{code}/ctrl/{year}/displaytype/4.phtml"
+)
 
 # Conservative: annual report available after Apr-30.
 ANNUAL_REPORT_AVAILABLE_MMDD = "0430"
@@ -64,6 +68,13 @@ def _sina_stmt_value(html: str, *, label_contains: str, date_str: str) -> Option
         return None
 
 
+def _sina_fetch_html_cached(url: str, cache_path: Path, encoding: str = "gb18030") -> str:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cache_path.exists():
+        cache_path.write_bytes(http_get_bytes(url))
+    return cache_path.read_bytes().decode(encoding, errors="ignore")
+
+
 @dataclass(frozen=True)
 class Fundamentals:
     year: int
@@ -72,32 +83,66 @@ class Fundamentals:
     equity_yuan: Optional[float]
     assets_yuan: Optional[float]
     liabilities_yuan: Optional[float]
+    cfo_yuan: Optional[float]
+    cash_yuan: Optional[float]
+    short_debt_yuan: Optional[float]
+    long_debt_yuan: Optional[float]
+    accounts_receivable_yuan: Optional[float]
+    inventory_yuan: Optional[float]
+    operating_profit_yuan: Optional[float]
+    interest_expense_yuan: Optional[float]
 
 
 def get_fundamentals_last_annual(code: str, asof_date: str, cache_dir: Path) -> Fundamentals:
     y = _last_available_annual_year(asof_date)
-    return get_fundamentals_annual(code=code, year=y, cache_dir=cache_dir)
+    return get_fundamentals_annual(code=code, year=y, cache_dir=cache_dir, with_cashflow=True)
 
 
-def get_fundamentals_annual(*, code: str, year: int, cache_dir: Path) -> Fundamentals:
+def get_fundamentals_annual(*, code: str, year: int, cache_dir: Path, with_cashflow: bool = False) -> Fundamentals:
     date_str = f"{year}-12-31"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    profit = cache_dir / f"profit_{code}_{year}.html"
-    balance = cache_dir / f"balance_{code}_{year}.html"
-    if not profit.exists():
-        profit.write_bytes(http_get_bytes(SINA_PROFIT_URL.format(code=code, year=year)))
-    if not balance.exists():
-        balance.write_bytes(http_get_bytes(SINA_BALANCE_URL.format(code=code, year=year)))
-
-    profit_html = profit.read_bytes().decode("gb18030", errors="ignore")
-    bal_html = balance.read_bytes().decode("gb18030", errors="ignore")
+    profit_html = _sina_fetch_html_cached(
+        SINA_PROFIT_URL.format(code=code, year=year), cache_dir / f"profit_{code}_{year}.html"
+    )
+    bal_html = _sina_fetch_html_cached(
+        SINA_BALANCE_URL.format(code=code, year=year), cache_dir / f"balance_{code}_{year}.html"
+    )
+    cash_html = ""
+    if with_cashflow:
+        cash_html = _sina_fetch_html_cached(
+            SINA_CASHFLOW_URL.format(code=code, year=year), cache_dir / f"cash_{code}_{year}.html"
+        )
 
     revenue_wy = _sina_stmt_value(profit_html, label_contains="营业总收入", date_str=date_str)
     np_wy = _sina_stmt_value(profit_html, label_contains="归属于母公司所有者的净利润", date_str=date_str)
+    op_profit_wy = _sina_stmt_value(profit_html, label_contains="营业利润", date_str=date_str)
+    interest_wy = _sina_stmt_value(profit_html, label_contains="利息支出", date_str=date_str)
+    if interest_wy is None:
+        fin_exp_wy = _sina_stmt_value(profit_html, label_contains="财务费用", date_str=date_str)
+        # 财务费用可能为负（利息收入大于利息支出），作为“利息支出”代理时只取正值部分
+        interest_wy = fin_exp_wy if (fin_exp_wy is not None and fin_exp_wy > 0) else None
+
     equity_wy = _sina_stmt_value(bal_html, label_contains="归属于母公司股东权益合计", date_str=date_str)
     assets_wy = _sina_stmt_value(bal_html, label_contains="资产总计", date_str=date_str)
     liab_wy = _sina_stmt_value(bal_html, label_contains="负债合计", date_str=date_str)
+    cash_wy = _sina_stmt_value(bal_html, label_contains="货币资金", date_str=date_str)
+    st_debt_wy = _sina_stmt_value(bal_html, label_contains="短期借款", date_str=date_str)
+    cur_lt_debt_wy = _sina_stmt_value(bal_html, label_contains="一年内到期的非流动负债", date_str=date_str)
+    lt_debt_wy = _sina_stmt_value(bal_html, label_contains="长期借款", date_str=date_str)
+    bonds_wy = _sina_stmt_value(bal_html, label_contains="应付债券", date_str=date_str)
+    ar_wy = _sina_stmt_value(bal_html, label_contains="应收账款", date_str=date_str)
+    inv_wy = _sina_stmt_value(bal_html, label_contains="存货", date_str=date_str)
+
+    cfo_wy = (
+        _sina_stmt_value(cash_html, label_contains="经营活动产生的现金流量净额", date_str=date_str) if cash_html else None
+    )
+
+    short_debt_wy = 0.0
+    short_debt_wy += st_debt_wy or 0.0
+    short_debt_wy += cur_lt_debt_wy or 0.0
+
+    long_debt_wy = 0.0
+    long_debt_wy += lt_debt_wy or 0.0
+    long_debt_wy += bonds_wy or 0.0
 
     def wy_to_yuan(x: Optional[float]) -> Optional[float]:
         return x * 10000 if x is not None else None
@@ -109,6 +154,14 @@ def get_fundamentals_annual(*, code: str, year: int, cache_dir: Path) -> Fundame
         equity_yuan=wy_to_yuan(equity_wy),
         assets_yuan=wy_to_yuan(assets_wy),
         liabilities_yuan=wy_to_yuan(liab_wy),
+        cfo_yuan=wy_to_yuan(cfo_wy),
+        cash_yuan=wy_to_yuan(cash_wy),
+        short_debt_yuan=wy_to_yuan(short_debt_wy) if short_debt_wy > 0 else None,
+        long_debt_yuan=wy_to_yuan(long_debt_wy) if long_debt_wy > 0 else None,
+        accounts_receivable_yuan=wy_to_yuan(ar_wy),
+        inventory_yuan=wy_to_yuan(inv_wy),
+        operating_profit_yuan=wy_to_yuan(op_profit_wy),
+        interest_expense_yuan=wy_to_yuan(interest_wy),
     )
 
 
@@ -122,5 +175,5 @@ def get_fundamentals_series_last_n_years(*, code: str, asof_date: str, n: int, c
     years = list(range(last_y - (n - 1), last_y + 1))
     out: list[Fundamentals] = []
     for y in years:
-        out.append(get_fundamentals_annual(code=code, year=y, cache_dir=cache_dir))
+        out.append(get_fundamentals_annual(code=code, year=y, cache_dir=cache_dir, with_cashflow=False))
     return out
