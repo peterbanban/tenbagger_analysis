@@ -1,57 +1,49 @@
-# A股 2019-2025 十倍股扫描（收盘价、前复权）
+# tenbagger_analysis：A股十倍股研究与选股
 
-按你的口径：
-- 价格：收盘价
-- 复权：前复权（`fqt=1`）
-- 区间：`2019-01-01` 到 `2025-12-31`，任意“区间内低点 → 后续高点”首次达到 `10x`
-- 市值：优先用公开接口的“当日总市值”（东方财富日K不直接给），因此本工具采用兜底：`当日收盘价(不复权) × 当日总股本`（总股本来自东方财富 HSF10 股本变动）
+本项目把“数据 / 模型 / 选股 / 回测”拆分成清晰的模块，支持先把近几年A股日K落到本地SQLite，后续脚本优先离线查询，减少全市场重复拉取与限流问题。
 
-## 运行
+## 目录结构（核心）
+- `tenbagger/data/`：数据层（SQLite行情库 + 网络补全：股本/财务/F10等）
+- `tenbagger/models/`：模型与打分逻辑（两模型 + 框架V2天花板/第二曲线代理）
+- `tenbagger/screeners/`：选股脚本（输出Top30等）
+- `tenbagger/backtests/`：回测脚本（组合收益分布估计等）
+- `data/`：本地SQLite行情库（大文件，已在 `.gitignore` 忽略）
 
-首次运行（会拉取全A股列表并开始扫描，时间较长，建议让它跑完）：
+## 1) 本地数据（推荐先做）
+近5年 + 前复权日K落库（会使用网络，首次耗时较长）：
 ```bash
-python3 a_share_tenbagger/tenbagger_scan.py scan --out a_share_tenbagger/out
+python3 local_market_db.py --db data/tenbagger_analysis_market.sqlite init
+python3 local_market_db.py --db data/tenbagger_analysis_market.sqlite update-universe --exclude-st
+python3 local_market_db.py --db data/tenbagger_analysis_market.sqlite download-kline --beg 2021-01-01 --with-fqt1
 ```
 
-扫描完成后生成：
-- `a_share_tenbagger/out/tenbaggers.csv`：所有在区间内达到过10倍的股票清单（含低点/达成日/用时/市值等）
-- `a_share_tenbagger/out/summary.json`：汇总统计（市值分布、行业分布、用时分布等）
+说明见：
+- `LOCAL_DATA.md`
+- `MARKET_DB_EXPERIMENT.md`
 
-中断后续跑（断点续跑）：
+## 2) 选股（Top30）
+两模型Top30：
 ```bash
-python3 a_share_tenbagger/tenbagger_scan.py scan --out a_share_tenbagger/out --resume
+python3 screen_top30_two_models.py --out out_screen_two_models --exclude-st
 ```
 
-只做汇总（不重新抓数据）：
+框架V2（加入“天花板/第二曲线”代理指标）Top30：
 ```bash
-python3 a_share_tenbagger/tenbagger_scan.py summarize --out a_share_tenbagger/out
+python3 screen_top30_framework_v2.py --out out_screen_framework_v2 --exclude-st
 ```
 
-## 半自动选股（硬筛→人工打分）
-
-用东方财富公开接口做一轮“硬筛”，把全A股缩小到可人工研究的候选池（默认排除`ST/*ST`）：
+## 3) 回测（固定篮子1年收益分布估计）
+按“CSV篮子（按总分分权）”做滚动1年收益分布估计：
 ```bash
-python3 a_share_tenbagger/hard_screen.py --out a_share_tenbagger/out_screen
+python3 portfolio_expected_return_1y.py --basket out_screen_framework_v2/top30_framework_v2.csv --out out_portfolio_1y
 ```
 
-为了把候选池进一步压缩到约`~200`只以内（更适合手工打分），可用更严格参数（示例）：
+## 4) 十倍股扫描（可选，联网）
+区间十倍股扫描（2019-01-01..2025-12-31，前复权收盘价判定10x）：
 ```bash
-python3 a_share_tenbagger/hard_screen.py --out a_share_tenbagger/out_screen_strict --workers 24 \
-  --min-mktcap-yi 15 --max-mktcap-yi 80 \
-  --min-pe 8 --max-pe 45 \
-  --min-revenue-yi 10 --min-net-profit-yi 1.0 --min-net-margin 0.08 \
-  --min-ret-250d 0.10 --min-dd-from-250d-high -0.20 \
-  --min-score 20
+python3 tenbagger_scan.py scan --out out_tenbagger_scan --resume
 ```
-
-输出：
-- `a_share_tenbagger/out_screen/candidates.csv`：候选清单（市值、PE/PB、营收/净利、简单动量、综合分）
-- `a_share_tenbagger/out_screen/candidates_summary.json`：参数与Top10
-
-然后用打分卡进行人工深度分析：
-- `a_share_tenbagger/scorecard_template.md`
-- `a_share_tenbagger/scorecard_template.csv`
 
 ## 注意
-- 数据源：东方财富 `push2/clist` + `push2his/kline` + `PC_HSF10/CapitalStockStructure`
-- 访问频率过高可能触发限流；脚本内置重试与随机退避，但如果你网络不稳定，可降低并发：`--workers 6`
+- SQLite行情库（`data/*.sqlite`）默认不提交Git。
+- 估值用到的“股本/财务/F10”等仍需联网抓取（已做本地cache，避免重复下载）。

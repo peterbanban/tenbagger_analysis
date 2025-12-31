@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
