@@ -1,0 +1,89 @@
+{
+  "input_count": 5208,
+  "candidate_count": 150,
+  "params": {
+    "min_mktcap_yi": 15.0,
+    "max_mktcap_yi": 80.0,
+    "min_pe": 8.0,
+    "max_pe": 45.0,
+    "min_net_margin": 0.08,
+    "min_revenue_yi": 10.0,
+    "min_net_profit_yi": 1.0,
+    "min_ret_250d": 0.1,
+    "min_dd_from_250d_high": -0.2,
+    "min_score": 20.0,
+    "exclude_st": true
+  },
+  "top10": [
+    {
+      "code": "300373",
+      "name": "扬杰科技",
+      "industry": "半导体",
+      "mktcap_yi": 53.4773751695,
+      "score": 46.4
+    },
+    {
+      "code": "002472",
+      "name": "双环传动",
+      "industry": "汽车零部件",
+      "mktcap_yi": 64.6637299815,
+      "score": 46.3
+    },
+    {
+      "code": "603809",
+      "name": "豪能股份",
+      "industry": "汽车零部件",
+      "mktcap_yi": 18.948405056,
+      "score": 46.3
+    },
+    {
+      "code": "300926",
+      "name": "博俊科技",
+      "industry": "汽车零部件",
+      "mktcap_yi": 40.7472678345,
+      "score": 46.3
+    },
+    {
+      "code": "300893",
+      "name": "松原安全",
+      "industry": "汽车零部件",
+      "mktcap_yi": 18.338215255999998,
+      "score": 46.3
+    },
+    {
+      "code": "001311",
+      "name": "多利科技",
+      "industry": "汽车零部件",
+      "mktcap_yi": 27.0945320255,
+      "score": 46.3
+    },
+    {
+      "code": "688578",
+      "name": "艾力斯",
+      "industry": "化学制药",
+      "mktcap_yi": 37.3301765299,
+      "score": 45.8
+    },
+    {
+      "code": "603920",
+      "name": "世运电路",
+      "industry": "电子元件",
+      "mktcap_yi": 40.7798376837,
+      "score": 45.6
+    },
+    {
+      "code": "002484",
+      "name": "江海股份",
+      "industry": "电子元件",
+      "mktcap_yi": 41.1712013738,
+      "score": 45.6
+    },
+    {
+      "code": "001389",
+      "name": "广合科技",
+      "industry": "电子元件",
+      "mktcap_yi": 38.3512902417,
+      "score": 45.6
+    }
+  ]
+}

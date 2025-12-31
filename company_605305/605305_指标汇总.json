@@ -1,0 +1,11 @@
+{
+  "code": "605305",
+  "secid": "1.605305",
+  "out_financial_csv": "Documents/github/a_share_tenbagger_analysis_2019_2025/company_605305/605305_财务指标_2021_2024.csv",
+  "out_valuation_csv": "Documents/github/a_share_tenbagger_analysis_2019_2025/company_605305/605305_估值_截至2025-12-30.csv",
+  "out_kline_csv": "Documents/github/a_share_tenbagger_analysis_2019_2025/company_605305/605305_股价结构_前复权.csv",
+  "notes": [
+    "客户集中度/前五大客户、订单/在手订单、海外收入按地区拆分、产品结构/毛利按业务：通常需要年报附注文本/经营讨论(MD&A)；本脚本只抓取三大表中的可结构化字段。",
+    "境外收入字段并非所有公司会直接在利润表披露，因此可能为空。"
+  ]
+}

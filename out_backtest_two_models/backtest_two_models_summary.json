@@ -1,0 +1,26 @@
+{
+  "count": 1132,
+  "positives_low": 284,
+  "dv_low10x": {
+    "coverage": 1129,
+    "base_rate": 0.2508833922261484,
+    "precision@50": 0.14,
+    "precision@100": 0.17,
+    "precision@200": 0.215,
+    "precision@500": 0.256,
+    "score_median": 63.0,
+    "score_p90": 46.0
+  },
+  "tc_entry10x": {
+    "coverage": 1035,
+    "base_rate": 0.09758454106280193,
+    "precision@50": 0.18,
+    "precision@100": 0.16,
+    "precision@200": 0.13,
+    "precision@500": 0.118,
+    "score_median": 53.0,
+    "score_p90": 35.0
+  },
+  "tc_entry_coverage_count": 1035,
+  "positives_entry": 101
+}

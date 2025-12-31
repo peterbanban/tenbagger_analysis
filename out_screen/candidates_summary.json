@@ -1,0 +1,89 @@
+{
+  "input_count": 5208,
+  "candidate_count": 753,
+  "params": {
+    "min_mktcap_yi": 10.0,
+    "max_mktcap_yi": 100.0,
+    "min_pe": 5.0,
+    "max_pe": 60.0,
+    "min_net_margin": 0.05,
+    "min_revenue_yi": 5.0,
+    "min_net_profit_yi": 0.5,
+    "min_ret_250d": -0.1,
+    "min_dd_from_250d_high": -0.3,
+    "min_score": 18.0,
+    "exclude_st": true
+  },
+  "top10": [
+    {
+      "code": "688002",
+      "name": "睿创微纳",
+      "industry": "半导体",
+      "mktcap_yi": 40.859760261999995,
+      "score": 46.4
+    },
+    {
+      "code": "300373",
+      "name": "扬杰科技",
+      "industry": "半导体",
+      "mktcap_yi": 53.4773751695,
+      "score": 46.4
+    },
+    {
+      "code": "002472",
+      "name": "双环传动",
+      "industry": "汽车零部件",
+      "mktcap_yi": 64.6637299815,
+      "score": 46.3
+    },
+    {
+      "code": "301160",
+      "name": "翔楼新材",
+      "industry": "汽车零部件",
+      "mktcap_yi": 11.0500377645,
+      "score": 46.3
+    },
+    {
+      "code": "603809",
+      "name": "豪能股份",
+      "industry": "汽车零部件",
+      "mktcap_yi": 18.948405056,
+      "score": 46.3
+    },
+    {
+      "code": "603239",
+      "name": "浙江仙通",
+      "industry": "汽车零部件",
+      "mktcap_yi": 10.2446810774,
+      "score": 46.3
+    },
+    {
+      "code": "300926",
+      "name": "博俊科技",
+      "industry": "汽车零部件",
+      "mktcap_yi": 40.7472678345,
+      "score": 46.3
+    },
+    {
+      "code": "603950",
+      "name": "长源东谷",
+      "industry": "汽车零部件",
+      "mktcap_yi": 16.4772194553,
+      "score": 46.3
+    },
+    {
+      "code": "300893",
+      "name": "松原安全",
+      "industry": "汽车零部件",
+      "mktcap_yi": 18.338215255999998,
+      "score": 46.3
+    },
+    {
+      "code": "001311",
+      "name": "多利科技",
+      "industry": "汽车零部件",
+      "mktcap_yi": 27.0945320255,
+      "score": 46.3
+    }
+  ]
+}

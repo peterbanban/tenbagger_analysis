@@ -1,0 +1,11 @@
+{
+  "universe": 5208,
+  "base_scored": 3945,
+  "candidates_enriched": 800,
+  "top": 30,
+  "out_csv": "Documents/github/a_share_tenbagger_analysis_2019_2025/out_screen_framework_v2/top30_framework_v2.csv",
+  "notes": [
+    "‘天花板/第二曲线’为代理指标：行业关键词映射 + F10主营构成(产品/地区)集中度 + 研发/资本开支强度；不等同于真实TAM测算。",
+    "如需更严谨的TAM：需要引入行业装机/渗透率/单价等外部数据或手工假设。"
+  ]
+}
