@@ -28,6 +28,8 @@ from backtest_two_models import (  # type: ignore
     get_all_a_shares,
 )
 
+from sqlite_market import get_dates_and_closes, list_stocks, open_db
+
 
 def _ma(closes: list[float], end_idx: int, window: int) -> Optional[float]:
     if end_idx - window + 1 < 0:
@@ -203,6 +205,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--exclude-st", action="store_true")
+    ap.add_argument(
+        "--db",
+        default="",
+        help="sqlite db path for offline stocks+kline. default: <project>/data/tenbagger_analysis_market.sqlite if exists",
+    )
     args = ap.parse_args(argv)
 
     random.seed(args.seed)
@@ -212,15 +219,130 @@ def main(argv: list[str]) -> int:
     cache_dir = out_dir / ".cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    stocks = get_all_a_shares()
-    if args.exclude_st:
-        stocks = [s for s in stocks if "ST" not in s.name.upper()]
+    # Prefer local SQLite market db.
+    db_path = Path(args.db).expanduser() if args.db else (Path(__file__).resolve().parent / "data" / "tenbagger_analysis_market.sqlite")
+    db_conn = None
+    stocks: list[Stock] = []
+    if db_path.exists():
+        db_conn = open_db(db_path)
+        stocks = [Stock(secid=s.secid, code=s.code, name=s.name, industry=s.industry) for s in list_stocks(db_conn)]
+        if args.exclude_st:
+            stocks = [s for s in stocks if "ST" not in s.name.upper()]
+        print(f"using sqlite db: {db_path}")
+    else:
+        stocks = get_all_a_shares()
+        if args.exclude_st:
+            stocks = [s for s in stocks if "ST" not in s.name.upper()]
+        print("using network universe (no sqlite db found)")
 
     print(f"universe={len(stocks)} workers={args.workers}")
 
+    def score_one_with_series(s: Stock) -> Scored:
+        try:
+            secid = s.secid or _resolve_secid(s.code)
+            mkt = secid.split(".", 1)[0]
+            mkt_prefix = "SH" if mkt == "1" else "SZ"
+
+            if db_conn is not None:
+                fq_dates, fq_closes = get_dates_and_closes(db_conn, s.code, 1)
+                raw_dates, raw_closes = get_dates_and_closes(db_conn, s.code, 0)
+            else:
+                fq_dates, fq_closes = _kline_cached(
+                    secid=secid, fqt=1, beg="20170101", end=END_DATE.replace("-", ""), cache_dir=cache_dir / "kline"
+                )
+                raw_dates, raw_closes = _kline_cached(
+                    secid=secid, fqt=0, beg="20170101", end=END_DATE.replace("-", ""), cache_dir=cache_dir / "kline"
+                )
+
+            asof_date = _last_trading_date(fq_dates)
+            if not asof_date:
+                raise RuntimeError("no kline data")
+
+            ret120, ret250, dd = _momentum_from_series(fq_dates, fq_closes, asof_date)
+            entry_ok, ma20, ma60 = _entry_ok_today(fq_dates, fq_closes, asof_date)
+
+            raw_map = dict(zip(raw_dates, raw_closes))
+            close_raw = raw_map.get(asof_date)
+            shares = _get_total_shares(s.code, mkt_prefix, asof_date, cache_dir / "capital")
+            mktcap = (close_raw * shares) if (close_raw is not None and shares is not None) else None
+            mktcap_yi = (mktcap / 1e8) if mktcap is not None else None
+
+            f = _get_fundamentals_last_annual(s.code, asof_date, cache_dir / "sina")
+            nm = _safe_div(f.net_profit_yuan, f.revenue_yuan) if (f.revenue_yuan and f.revenue_yuan > 0) else None
+            roe = _safe_div(f.net_profit_yuan, f.equity_yuan) if (f.equity_yuan and f.equity_yuan > 0) else None
+            debt_ratio = _safe_div(f.liabilities_yuan, f.assets_yuan) if (f.assets_yuan and f.assets_yuan > 0) else None
+            pe = (mktcap / f.net_profit_yuan) if (mktcap is not None and f.net_profit_yuan and f.net_profit_yuan > 0) else None
+            pb = (mktcap / f.equity_yuan) if (mktcap is not None and f.equity_yuan and f.equity_yuan > 0) else None
+
+            score_a = _score_dv(mktcap_yi, pe, pb, nm, roe, debt_ratio, ret250, dd)
+            score_b = _score_tc(mktcap_yi, pe, pb, nm, roe, ret120, ret250, dd)
+
+            def composite(sa: Optional[float], sb: Optional[float]) -> Optional[float]:
+                if sa is None and sb is None:
+                    return None
+                if sa is None:
+                    return sb
+                if sb is None:
+                    return sa
+                return 0.5 * sa + 0.5 * sb
+
+            score_composite_loose = composite(score_a, score_b)
+            score_composite_strict = composite(score_a, score_b) if entry_ok else score_a
+
+            return Scored(
+                code=s.code,
+                name=s.name,
+                industry=s.industry,
+                asof_date=asof_date,
+                score_a=score_a,
+                score_b=score_b,
+                score_composite_strict=score_composite_strict,
+                score_composite_loose=score_composite_loose,
+                entry_ok=1 if entry_ok else 0,
+                ma20=ma20,
+                ma60=ma60,
+                mktcap_yi=mktcap_yi,
+                pe=pe,
+                pb=pb,
+                nm=nm,
+                roe=roe,
+                debt_ratio=debt_ratio,
+                ret120=ret120,
+                ret250=ret250,
+                dd250=dd,
+                error="",
+            )
+        except Exception as e:
+            msg = str(e)
+            if len(msg) > 300:
+                msg = msg[:300] + "..."
+            return Scored(
+                code=s.code,
+                name=s.name,
+                industry=s.industry,
+                asof_date="",
+                score_a=None,
+                score_b=None,
+                score_composite_strict=None,
+                score_composite_loose=None,
+                entry_ok=None,
+                ma20=None,
+                ma60=None,
+                mktcap_yi=None,
+                pe=None,
+                pb=None,
+                nm=None,
+                roe=None,
+                debt_ratio=None,
+                ret120=None,
+                ret250=None,
+                dd250=None,
+                error=msg,
+            )
+
     scored: list[Scored] = []
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = [ex.submit(_score_one, s, cache_dir) for s in stocks]
+        futs = [ex.submit(score_one_with_series, s) for s in stocks]
         for fut in as_completed(futs):
             scored.append(fut.result())
 

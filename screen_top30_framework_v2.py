@@ -30,6 +30,8 @@ from backtest_two_models import (  # type: ignore
     get_all_a_shares,
 )
 
+from sqlite_market import get_dates_and_closes, list_stocks, open_db
+
 
 EM_BUSINESS_ANALYSIS_URL = "https://emweb.securities.eastmoney.com/PC_HSF10/BusinessAnalysis/PageAjax?code={code}"
 
@@ -299,15 +301,22 @@ class BaseScore:
     error: str
 
 
-def score_base(stock: Stock, cache_dir: Path) -> BaseScore:
+def score_base(stock: Stock, cache_dir: Path, db_conn) -> BaseScore:
     try:
         secid = _resolve_secid(stock.code)
         mkt = secid.split(".", 1)[0]
         mkt_prefix = "SH" if mkt == "1" else "SZ"
 
-        fq_dates, fq_closes = _kline_cached(
-            secid=secid, fqt=1, beg="20170101", end=END_DATE.replace("-", ""), cache_dir=cache_dir / "kline"
-        )
+        if db_conn is not None:
+            fq_dates, fq_closes = get_dates_and_closes(db_conn, stock.code, 1)
+            raw_dates, raw_closes = get_dates_and_closes(db_conn, stock.code, 0)
+        else:
+            fq_dates, fq_closes = _kline_cached(
+                secid=secid, fqt=1, beg="20170101", end=END_DATE.replace("-", ""), cache_dir=cache_dir / "kline"
+            )
+            raw_dates, raw_closes = _kline_cached(
+                secid=secid, fqt=0, beg="20170101", end=END_DATE.replace("-", ""), cache_dir=cache_dir / "kline"
+            )
         asof_date = _last_trading_date(fq_dates)
         if not asof_date:
             raise RuntimeError("no kline")
@@ -316,9 +325,6 @@ def score_base(stock: Stock, cache_dir: Path) -> BaseScore:
         entry_ok, _, _ = _entry_ok_today(fq_dates, fq_closes, asof_date)
 
         # Raw close and shares for market cap
-        raw_dates, raw_closes = _kline_cached(
-            secid=secid, fqt=0, beg="20170101", end=END_DATE.replace("-", ""), cache_dir=cache_dir / "kline"
-        )
         raw_map = dict(zip(raw_dates, raw_closes))
         close_raw = raw_map.get(asof_date)
         shares = _get_total_shares(stock.code, mkt_prefix, asof_date, cache_dir / "capital")
@@ -468,6 +474,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--candidates", type=int, default=800, help="top-N by base score to enrich with F10 business data")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument(
+        "--db",
+        default="",
+        help="sqlite db path for offline stocks+kline. default: <project>/data/tenbagger_analysis_market.sqlite if exists",
+    )
     args = ap.parse_args(argv)
 
     random.seed(args.seed)
@@ -477,15 +488,26 @@ def main(argv: list[str]) -> int:
     cache_dir = out_dir / ".cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    stocks = get_all_a_shares()
-    if args.exclude_st:
-        stocks = [s for s in stocks if "ST" not in s.name.upper()]
+    db_path = Path(args.db).expanduser() if args.db else (Path(__file__).resolve().parent / "data" / "tenbagger_analysis_market.sqlite")
+    db_conn = None
+    stocks: list[Stock] = []
+    if db_path.exists():
+        db_conn = open_db(db_path)
+        stocks = [Stock(secid=s.secid, code=s.code, name=s.name, industry=s.industry) for s in list_stocks(db_conn)]
+        if args.exclude_st:
+            stocks = [s for s in stocks if "ST" not in s.name.upper()]
+        print(f"using sqlite db: {db_path}")
+    else:
+        stocks = get_all_a_shares()
+        if args.exclude_st:
+            stocks = [s for s in stocks if "ST" not in s.name.upper()]
+        print("using network universe (no sqlite db found)")
 
     print(f"universe={len(stocks)} workers={args.workers}")
 
     base_scores: list[BaseScore] = []
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = [ex.submit(score_base, s, cache_dir) for s in stocks]
+        futs = [ex.submit(score_base, s, cache_dir, db_conn) for s in stocks]
         for fut in as_completed(futs):
             base_scores.append(fut.result())
 

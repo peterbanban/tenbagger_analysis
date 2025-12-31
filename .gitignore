@@ -8,6 +8,16 @@ __pycache__/
 # Large downloaded caches (Eastmoney/Sina HTML/Kline etc.)
 .cache/
 **/.cache/
+.cache*/
+**/.cache*/
+
+# Local SQLite market DB (large)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
 
 # Local env/venv
 .venv/
