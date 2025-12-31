@@ -25,20 +25,19 @@ python3 local_market_db.py --db data/tenbagger_analysis_market.sqlite download-k
 - `MARKET_DB_EXPERIMENT.md`
 
 ## 2) 选股（Top30）
-两模型Top30：
+融合模型Top30（默认：硬门槛 + 拐点信号，尽量降低沉默成本）：
 ```bash
-python3 screen_top30_two_models.py --out out_screen_two_models --exclude-st
+python3 screen_top30.py --out out_screen --exclude-st
 ```
 
-框架V2（加入“天花板/第二曲线”代理指标）Top30：
-```bash
-python3 screen_top30_framework_v2.py --out out_screen_framework_v2 --exclude-st
-```
+可选：关闭硬门槛 / 关闭拐点过滤（不推荐）：
+`python3 screen_top30.py --out out_screen --exclude-st --disable-gate`
+`python3 screen_top30.py --out out_screen --exclude-st --no-require-entry`
 
 ## 3) 回测（固定篮子1年收益分布估计）
 按“CSV篮子（按总分分权）”做滚动1年收益分布估计：
 ```bash
-python3 portfolio_expected_return_1y.py --basket out_screen_framework_v2/top30_framework_v2.csv --out out_portfolio_1y
+python3 portfolio_expected_return_1y.py --basket out_screen/top30_fused.csv --out out_portfolio_1y
 ```
 
 ## 4) 十倍股扫描（可选，联网）

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .http import http_get_json
-from ..models.framework_v2 import hhi
+from ..models.fused import hhi
 
 
 EM_BUSINESS_ANALYSIS_URL = "https://emweb.securities.eastmoney.com/PC_HSF10/BusinessAnalysis/PageAjax?code={code}"
@@ -95,4 +95,3 @@ def business_snapshot_asof(
         product_hhi=hhi_value,
         product_seg_cnt=len(prod_shares),
     )
-

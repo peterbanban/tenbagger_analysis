@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from tenbagger.screeners.top30_two_models import main
+from tenbagger.screeners.top30_fused import main
 
 
 if __name__ == "__main__":

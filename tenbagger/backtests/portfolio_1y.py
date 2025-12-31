@@ -52,7 +52,9 @@ def load_constituents(path: Path) -> List[Constituent]:
     for row in rows:
         code = (row.get("股票代码") or row.get("code") or "").strip()
         name = (row.get("股票名称") or row.get("name") or "").strip()
-        sc = _parse_float(row.get("总分(新框架)") or row.get("score_total") or "")
+        sc = _parse_float(
+            row.get("总分(融合模型)") or row.get("总分(新框架)") or row.get("score_total") or ""
+        )
         if not code or sc is None:
             continue
         names[code] = name
@@ -99,7 +101,7 @@ def percentiles(xs: List[float], ps: List[float]) -> Dict[str, float]:
 
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--basket", required=True, help="CSV file with 股票代码/总分(新框架)")
+    ap.add_argument("--basket", required=True, help="CSV file with 股票代码/总分(融合模型)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--db", default="", help="sqlite db path, default: project/data/tenbagger_analysis_market.sqlite")
     ap.add_argument("--start", default="2021-01-01")
@@ -200,7 +202,7 @@ def main(argv: List[str]) -> int:
     out_w = out_dir / "portfolio_constituents_weights.csv"
     with out_w.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["股票代码", "股票名称", "总分(新框架)", "权重"])
+        w.writerow(["股票代码", "股票名称", "总分(融合模型)", "权重"])
         for c in sorted(constituents, key=lambda x: x.weight, reverse=True):
             w.writerow([c.code, c.name, _fmt(c.score_total, 2), _fmt(c.weight, 6)])
 
@@ -213,4 +215,3 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
