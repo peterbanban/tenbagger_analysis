@@ -34,6 +34,7 @@
 
 ## 5. 生成过程（本次实验执行记录）
 使用脚本：`Documents/github/a_share_tenbagger_analysis_2019_2025/local_market_db.py`
+（入口脚本；实现位于 `tenbagger/tools/local_market_db.py`）
 
 执行步骤：
 1) 初始化：创建SQLite与表
@@ -64,4 +65,3 @@ python3 Documents/github/a_share_tenbagger_analysis_2019_2025/local_market_db.py
 建议把“取K线/取股票池”做成一个数据层：
 - 优先查SQLite（快、稳定、可重复）
 - 只有SQLite缺失数据时再走网络补全（并写回SQLite）
-

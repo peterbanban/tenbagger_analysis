@@ -7,7 +7,10 @@
 - `tenbagger/models/`：模型与打分逻辑（两模型 + 框架V2天花板/第二曲线代理）
 - `tenbagger/screeners/`：选股脚本（输出Top30等）
 - `tenbagger/backtests/`：回测脚本（组合收益分布估计等）
+- `tenbagger/tools/`：一次性工具（本地行情库构建、十倍股扫描等）
 - `data/`：本地SQLite行情库（大文件，已在 `.gitignore` 忽略）
+
+说明：根目录的 `local_market_db.py` / `tenbagger_scan.py` 是薄入口，具体实现放在 `tenbagger/` 下，便于复用与维护。
 
 ## 1) 本地数据（推荐先做）
 近5年 + 前复权日K落库（会使用网络，首次耗时较长）：

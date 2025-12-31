@@ -13,6 +13,8 @@ SQLite占用取决于字段与索引，通常会在 **数GB** 级别。
 ## 2) 初始化与下载（一次性）
 在终端执行（会使用网络，跑很久，建议夜间跑）：
 
+说明：根目录的 `local_market_db.py` 是入口脚本，具体实现位于 `tenbagger/tools/local_market_db.py`。
+
 1) 初始化数据库：
 `python3 local_market_db.py --db ~/Documents/github/tenbagger_analysis_market.sqlite init`
 
@@ -43,4 +45,3 @@ SQLite占用取决于字段与索引，通常会在 **数GB** 级别。
 ## 5) 注意事项
 - 数据源为公开接口（东方财富）；存在限流/失败重试，首次全量下载需要很长时间。
 - SQLite不适合放进GitHub仓库（文件太大），建议只在本地存放；仓库里只放脚本与生成的CSV结果。
-
