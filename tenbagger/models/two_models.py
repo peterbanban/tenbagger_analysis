@@ -9,6 +9,15 @@ def parse_date(d: str) -> datetime:
     return datetime.strptime(d, "%Y-%m-%d")
 
 
+def _ma(closes: List[float], i: int, window: int) -> Optional[float]:
+    if window <= 0 or i < window - 1:
+        return None
+    seg = closes[i - (window - 1) : i + 1]
+    if not seg:
+        return None
+    return sum(seg) / window
+
+
 def momentum_from_series(
     dates: List[str], closes: List[float], asof_date: str
 ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
@@ -40,6 +49,48 @@ def entry_ok_ma(dates: List[str], closes: List[float], asof_date: str) -> Tuple[
     c0 = closes[i]
     ok = (ma20 > ma60) and (c0 > ma20)
     return ok, ma20, ma60
+
+
+@dataclass(frozen=True)
+class InflectionSignal:
+    ok: bool
+    ma20: Optional[float]
+    ma60: Optional[float]
+    ma120: Optional[float]
+    ma60_slope_20d: Optional[float]
+    pos_from_250_low: Optional[float]
+
+
+def inflection_signal(dates: List[str], closes: List[float], asof_date: str) -> InflectionSignal:
+    """
+    Attempts to catch "low-cost but turning" entries:
+    - Trend turns up (MA20 > MA60 and price > MA20)
+    - MA60 is rising (vs 20 trading days ago) to reduce dead-money periods
+    - Still not too far from 250d low
+    """
+    try:
+        i = dates.index(asof_date)
+    except ValueError:
+        return InflectionSignal(False, None, None, None, None, None)
+    if i < 260:
+        return InflectionSignal(False, None, None, None, None, None)
+
+    c0 = closes[i]
+    ma20 = _ma(closes, i, 20)
+    ma60 = _ma(closes, i, 60)
+    ma120 = _ma(closes, i, 120)
+    ma60_prev = _ma(closes, i - 20, 60) if i >= 80 else None
+    ma60_slope = (ma60 / ma60_prev - 1.0) if (ma60 is not None and ma60_prev is not None and ma60_prev > 0) else None
+
+    low250 = min(closes[i - 250 : i + 1])
+    pos_from_low = (c0 / low250 - 1.0) if low250 > 0 else None
+
+    trend_ok = (ma20 is not None and ma60 is not None and c0 > ma20 and ma20 > ma60)
+    slope_ok = (ma60_slope is not None and ma60_slope > 0)
+    low_cost_ok = (pos_from_low is not None and pos_from_low <= 0.60)
+
+    ok = bool(trend_ok and slope_ok and low_cost_ok)
+    return InflectionSignal(ok, ma20, ma60, ma120, ma60_slope, pos_from_low)
 
 
 def score_model_a(
@@ -185,3 +236,61 @@ def score_model_b(
         score += 8
     return min(100.0, score)
 
+
+def score_combined_inflection(
+    *,
+    score_a: Optional[float],
+    ret120: Optional[float],
+    ret250: Optional[float],
+    dd250: Optional[float],
+    signal: InflectionSignal,
+    growth_total: float,
+) -> float:
+    """
+    Single merged model (A+B->one):
+    - Keeps Model-A "quality/value" core
+    - Adds a turning-point entry layer to reduce dead money
+    - Adds multi-year growth proxy explicitly
+    """
+    base = score_a if score_a is not None else 0.0
+
+    trend = 0.0
+    if signal.ok:
+        trend += 55
+    else:
+        # still reward early recovery but less
+        if ret120 is not None and ret120 > 0:
+            trend += 18
+        if signal.ma60_slope_20d is not None and signal.ma60_slope_20d > 0:
+            trend += 12
+
+    if ret250 is not None and ret250 > 0:
+        trend += 10
+
+    # Prefer "cheap but not breaking down": moderate drawdown, but avoid chasing highs.
+    low_cost = 0.0
+    if signal.pos_from_250_low is not None:
+        if signal.pos_from_250_low <= 0.25:
+            low_cost += 45
+        elif signal.pos_from_250_low <= 0.45:
+            low_cost += 32
+        elif signal.pos_from_250_low <= 0.60:
+            low_cost += 22
+        else:
+            low_cost += 8
+    if dd250 is not None:
+        if dd250 <= -0.55:
+            low_cost += 25
+        elif dd250 <= -0.35:
+            low_cost += 18
+        elif dd250 <= -0.20:
+            low_cost += 10
+        elif dd250 <= -0.05:
+            low_cost += 4
+
+    trend = min(100.0, trend)
+    low_cost = min(100.0, low_cost)
+
+    # Weights: favor "can become big" + "turning now" while retaining quality/value.
+    total = 0.45 * base + 0.25 * trend + 0.15 * low_cost + 0.15 * growth_total
+    return float(min(100.0, max(0.0, total)))

@@ -76,15 +76,19 @@ class Fundamentals:
 
 def get_fundamentals_last_annual(code: str, asof_date: str, cache_dir: Path) -> Fundamentals:
     y = _last_available_annual_year(asof_date)
-    date_str = f"{y}-12-31"
+    return get_fundamentals_annual(code=code, year=y, cache_dir=cache_dir)
+
+
+def get_fundamentals_annual(*, code: str, year: int, cache_dir: Path) -> Fundamentals:
+    date_str = f"{year}-12-31"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    profit = cache_dir / f"profit_{code}_{y}.html"
-    balance = cache_dir / f"balance_{code}_{y}.html"
+    profit = cache_dir / f"profit_{code}_{year}.html"
+    balance = cache_dir / f"balance_{code}_{year}.html"
     if not profit.exists():
-        profit.write_bytes(http_get_bytes(SINA_PROFIT_URL.format(code=code, year=y)))
+        profit.write_bytes(http_get_bytes(SINA_PROFIT_URL.format(code=code, year=year)))
     if not balance.exists():
-        balance.write_bytes(http_get_bytes(SINA_BALANCE_URL.format(code=code, year=y)))
+        balance.write_bytes(http_get_bytes(SINA_BALANCE_URL.format(code=code, year=year)))
 
     profit_html = profit.read_bytes().decode("gb18030", errors="ignore")
     bal_html = balance.read_bytes().decode("gb18030", errors="ignore")
@@ -99,7 +103,7 @@ def get_fundamentals_last_annual(code: str, asof_date: str, cache_dir: Path) -> 
         return x * 10000 if x is not None else None
 
     return Fundamentals(
-        year=y,
+        year=year,
         revenue_yuan=wy_to_yuan(revenue_wy),
         net_profit_yuan=wy_to_yuan(np_wy),
         equity_yuan=wy_to_yuan(equity_wy),
@@ -107,3 +111,16 @@ def get_fundamentals_last_annual(code: str, asof_date: str, cache_dir: Path) -> 
         liabilities_yuan=wy_to_yuan(liab_wy),
     )
 
+
+def get_fundamentals_series_last_n_years(*, code: str, asof_date: str, n: int, cache_dir: Path) -> list[Fundamentals]:
+    """
+    Returns latest N annual fundamentals available as-of asof_date, ordered from old->new.
+    """
+    if n <= 0:
+        return []
+    last_y = _last_available_annual_year(asof_date)
+    years = list(range(last_y - (n - 1), last_y + 1))
+    out: list[Fundamentals] = []
+    for y in years:
+        out.append(get_fundamentals_annual(code=code, year=y, cache_dir=cache_dir))
+    return out

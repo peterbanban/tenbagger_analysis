@@ -3,6 +3,54 @@ from __future__ import annotations
 from typing import Optional
 
 
+def _cagr(old: Optional[float], new: Optional[float], years: int) -> Optional[float]:
+    if old is None or new is None or years <= 0:
+        return None
+    if old <= 0 or new <= 0:
+        return None
+    try:
+        return (new / old) ** (1.0 / years) - 1.0
+    except Exception:
+        return None
+
+
+def growth_score(rev_cagr: Optional[float], profit_cagr: Optional[float]) -> float:
+    """
+    Proxy for market expansion + company growth quality.
+    Uses multi-year CAGR, not single-year spikes.
+    """
+    score = 0.0
+    c = rev_cagr
+    if c is not None:
+        if c >= 0.35:
+            score += 55
+        elif c >= 0.25:
+            score += 48
+        elif c >= 0.15:
+            score += 38
+        elif c >= 0.08:
+            score += 28
+        elif c > 0:
+            score += 18
+        else:
+            score += 6
+    p = profit_cagr
+    if p is not None:
+        if p >= 0.45:
+            score += 45
+        elif p >= 0.30:
+            score += 38
+        elif p >= 0.18:
+            score += 28
+        elif p >= 0.08:
+            score += 18
+        elif p > 0:
+            score += 10
+        else:
+            score += 4
+    return min(100.0, score)
+
+
 def industry_ceiling_score(industry: str) -> float:
     s = (industry or "").strip()
     high = [
@@ -124,3 +172,40 @@ def total_score_framework_v2(*, base: float, ceiling_industry: float, ceiling_ov
     ceiling_total = 0.6 * ceiling_industry + 0.4 * ceiling_overseas
     return 0.50 * base + 0.25 * ceiling_total + 0.25 * second_total
 
+
+def total_score_framework_v3(
+    *,
+    base: float,
+    ceiling_industry: float,
+    ceiling_overseas: float,
+    second_total: float,
+    growth_total: float,
+) -> float:
+    """
+    V3: adds explicit growth/market-expansion proxy and slightly reduces pure base weight.
+    """
+    ceiling_total = 0.6 * ceiling_industry + 0.4 * ceiling_overseas
+    return 0.40 * base + 0.25 * ceiling_total + 0.20 * second_total + 0.15 * growth_total
+
+
+def hard_gate_ok(
+    *,
+    ceiling_total: float,
+    second_total: float,
+    growth_total: float,
+    min_ceiling_total: float = 55.0,
+    min_second_total: float = 55.0,
+    min_growth_total: float = 35.0,
+) -> bool:
+    """
+    Tenbagger hard gate (default):
+    - Must have either a big enough ceiling (industry/overseas) OR a credible second curve proxy,
+      AND must have non-trivial multi-year growth momentum.
+    """
+    if growth_total < min_growth_total:
+        return False
+    if ceiling_total >= min_ceiling_total:
+        return True
+    if second_total >= min_second_total:
+        return True
+    return False
