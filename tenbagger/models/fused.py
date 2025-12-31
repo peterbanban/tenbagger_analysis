@@ -1,5 +1,30 @@
 from __future__ import annotations
 
+"""
+融合十倍股打分模型（单一版本）
+
+目标：
+- 先用“硬门槛”过滤：没有足够业务天花板/第二曲线/增长势能的公司，理论上很难承载 10x 级别估值扩张与利润扩张。
+- 再用“拐点信号”尽量在底部/拐点附近介入，减少资金沉默成本（避免长期横盘等待）。
+- 同时保留“质量/估值/压力”核心分，避免只追题材/只追走势。
+
+数据口径（由上层 screener 负责取数）：
+- 行情：前复权收盘（fqt=1）用于收益/趋势；不复权收盘 + 总股本用于估算市值/估值。
+- 财务：Sina 年报（保守：截至日期 <= 4/30 时取 Y-2，否则取 Y-1）。
+- 业务结构：东方财富 F10 BusinessAnalysis（海外收入占比、产品集中度等）。
+
+分数结构（0..100）：
+1) core_score：质量/估值/压力（“能拿得住”）
+2) ceiling_total：行业天花板 + 出海天花板（“能做多大”）
+3) growth_total：3年 CAGR 代理（“能否持续扩容/增长”）
+4) second_total：第二曲线代理（多元化/研发/Capex）（“是否在培育新增量”）
+5) turning/low_cost：拐点与低成本买入代理（“减少沉默成本、避免追高”）
+
+最终输出：
+- hard_gate(...)：硬门槛是否通过（前置过滤）
+- score_fused_total(...)：融合总分（用于 Top30 排序）
+"""
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -89,7 +114,15 @@ def score_quality_value_core(
     dd250: Optional[float],
 ) -> float:
     """
-    A single "quality/value + stress" core score (0..100).
+    核心分（0..100）：质量/估值/压力（偏“价值投资底层”）
+
+    维度与分值（合计上限 100）：
+    - 规模（20）：偏好 10~50亿（更容易 10x），过大/过小扣分
+    - 盈利能力（25）：净利率 nm 越高越好
+    - ROE 代理（10）：用 年报净利润/归母权益 近似
+    - 估值（25）：PE、PB 越“合理/便宜”加分（避免买太贵）
+    - 压力/回撤（10）：距 250日高点回撤更深在“基本面OK”前提下反而加分（便宜/悲观）
+    - 杠杆安全（10）：资产负债率越低越好
     """
     score = 0.0
     # Size (20)
@@ -181,7 +214,12 @@ def _cagr(old: Optional[float], new: Optional[float], years: int) -> Optional[fl
 
 def growth_score(rev_cagr: Optional[float], profit_cagr: Optional[float]) -> float:
     """
-    Proxy for market expansion + company growth quality (multi-year, not single spikes).
+    增长得分（0..100）：用 3年 CAGR 作为“市场扩容+公司成长质量”的代理。
+
+    - rev_cagr：收入 3年CAGR（更接近行业空间/份额提升）
+    - profit_cagr：利润 3年CAGR（更接近经营杠杆/产品力/价格权）
+
+    注意：这里只是“代理”，真实的行业天花板与第二曲线仍以 F10/业务信息为主。
     """
     score = 0.0
     c = rev_cagr
@@ -216,6 +254,13 @@ def growth_score(rev_cagr: Optional[float], profit_cagr: Optional[float]) -> flo
 
 
 def industry_ceiling_score(industry: str) -> float:
+    """
+    行业天花板（0..100）：基于行业字符串的启发式映射。
+
+    - 高：软件/半导体/新能源/电池/机器人等（更可能容纳高估值）
+    - 中：化工/机械/消费电子等（可出十倍，但更依赖公司竞争力与扩张）
+    - 低：煤钢银行地产公用等（通常更偏周期/分红属性）
+    """
     s = (industry or "").strip()
     high = [
         "半导体",
@@ -249,6 +294,9 @@ def industry_ceiling_score(industry: str) -> float:
 
 
 def overseas_score(overseas_share: Optional[float]) -> float:
+    """
+    出海天花板（0..100）：海外收入占比越高，通常意味着可拓展市场更大/定价体系更多元（启发式）。
+    """
     if overseas_share is None:
         return 0.0
     if overseas_share >= 0.5:
@@ -274,6 +322,13 @@ def hhi(shares: list[float]) -> Optional[float]:
 
 
 def diversification_score(top1_share: Optional[float], hhi_value: Optional[float], seg_cnt: int) -> float:
+    """
+    多元化得分（0..100）：第二曲线的“业务结构代理”。
+
+    - seg_cnt：收入分部/产品条目数（越多越可能有第二曲线，但也可能是杂）
+    - top1_share：第一大产品占比（过高说明过度依赖单一品类）
+    - hhi：集中度指标（越低越分散）
+    """
     score = 0.0
     if seg_cnt >= 4:
         score += 20
@@ -305,6 +360,9 @@ def diversification_score(top1_share: Optional[float], hhi_value: Optional[float
 
 
 def rd_score(rd_ratio: Optional[float]) -> float:
+    """
+    研发强度（0..100）：研发/营收。
+    """
     if rd_ratio is None:
         return 0.0
     if rd_ratio >= 0.12:
@@ -319,6 +377,10 @@ def rd_score(rd_ratio: Optional[float]) -> float:
 
 
 def capex_score(capex_ratio: Optional[float]) -> float:
+    """
+    资本开支强度（0..100）：资本开支/营收。
+    对制造业/产能扩张型第二曲线更相关；对轻资产软件类可能偏低但不一定是坏事。
+    """
     if capex_ratio is None:
         return 0.0
     if capex_ratio >= 0.12:
@@ -353,6 +415,11 @@ def hard_gate(
     Tenbagger hard gate:
     - Must have (ceiling >= threshold OR second_curve_proxy >= threshold)
     - Must have non-trivial multi-year growth (proxy)
+
+    默认阈值解释：
+    - min_growth_total=35：至少要有“非平庸”的 3年增长势能，否则很难走出 10x 的长期主升浪
+    - min_ceiling_total=55：行业/出海维度至少不差（空间不低）
+    - min_second_total=55：或者第二曲线代理足够强（业务可能能再做大一轮）
     """
     if growth_total < min_growth_total:
         return HardGate(False, ceiling_total, second_total, growth_total)
@@ -372,7 +439,13 @@ def score_fused_total(
     second_total: float,
 ) -> float:
     """
-    Final fused score: "can become big" (gate metrics) + "turning now" (signal) + "cheap enough" + core quality/value.
+    融合总分（0..100），用于排序选股。
+
+    权重（可理解为四大维度）：
+    - 38% core_score：质量/估值/压力（更稳的底座）
+    - 22% turning：拐点/趋势确认（减少沉默成本）
+    - 15% low_cost：低成本买入代理（离 250日低点更近、回撤更深更加分）
+    - 25% prereq：十倍股前置条件（天花板/增长/第二曲线）
     """
     turning = 0.0
     if signal.ok:
@@ -407,7 +480,7 @@ def score_fused_total(
             low_cost += 4
     low_cost = min(100.0, low_cost)
 
-    # Gate components: ceiling/growth/second_curve are used as "alpha prerequisites" and as score drivers.
+    # prereq：十倍股“前置条件”本身也参与打分（不是只做过滤）。
     prereq = 0.0
     prereq += 0.40 * gate.ceiling_total
     prereq += 0.30 * gate.growth_total
@@ -415,4 +488,3 @@ def score_fused_total(
 
     total = 0.38 * core_score + 0.22 * turning + 0.15 * low_cost + 0.25 * prereq
     return float(min(100.0, max(0.0, total)))
-
